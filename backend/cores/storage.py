@@ -2,6 +2,7 @@ import json
 import os
 import logging
 from logging.handlers import RotatingFileHandler
+import sqlite3
 
 #initialize logger
 logger = logging.getLogger(__name__)
@@ -89,7 +90,69 @@ class Storage:
         print(f"Task ID {task_id} not found.")
         return False
 
+class SQLStorage:
+    def __init__(self):
+        base_dir = os.path.dirname(__file__)
+        self.db_path = os.path.join(base_dir, "data", "tasks.db")
+        os.makedirs(os.path.join(base_dir, "data"), exist_ok=True)
+
+        self.conn = sqlite3.connect(self.db_path)
+        self.cursor = self.conn.cursor()
+
+        self.cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            description TEXT NOT NULL,
+            details TEXT,
+            completed BOOLEAN DEFAULT 0,
+            due_date DATE
+        )
+        """)
+        self.conn.commit()
+        logger.debug("Database initialized successfully")
+
+    def add_task(self, task):
+        self.cursor.execute("""
+            INSERT INTO tasks (description, details, completed, due_date)
+            VALUES (?, ?, ?, ?)
+        """, (
+            task["description"],
+            task["details"],
+            task["completed"],
+            task["due_date"]
+        ))
+        self.conn.commit()
+        logger.debug(f"Task added to database: {task}")
     
+    def list_tasks(self):
+        self.cursor.execute("SELECT * FROM tasks")
+        rows = self.cursor.fetchall()
+        for row in rows:
+            print(row)
+
+    def done_task(self, task_id):
+        self.cursor.execute(f"""
+        UPDATE tasks SET completed = 1 WHERE id = {task_id}
+        """)
+        if self.cursor.rowcount == 0:
+            logger.warning(f"Task ID {task_id} not found to mark as done in database")
+            print(f"Task ID {task_id} not found.")
+            return
+        self.conn.commit()
+        logger.debug(f"Task marked as done in database: ID={task_id}")
+        return
+
+    def remove_task(self, task_id):
+        self.cursor.execute(f"""
+        DELETE FROM tasks WHERE id = {task_id}
+        """)
+        if self.cursor.rowcount == 0:
+            logger.warning(f"Task ID {task_id} not found for removal in database")
+            print(f"Task ID {task_id} not found.")
+            return
+        self.conn.commit()
+        logger.debug(f"Task removed from database: ID={task_id}")
+        return
 
 
 

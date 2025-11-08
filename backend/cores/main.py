@@ -27,31 +27,27 @@ json 格式：
 """
 
 
-from storage import Storage
+from storage import Storage, SQLStorage
 
 
 def main():
     while True:
-        storage = Storage()
+        storage = SQLStorage()
         input_cmd = input("Command (add/list/done/remove/exit): ").strip().lower()
-        if(input == "exit"):
-            storage.save_tasks(storage.get_tasks())
-            print("Tasks saved. Exiting.")
+        if(input_cmd == "exit"):
+            """storage.save_tasks(storage.get_tasks())
+            print("Tasks saved. Exiting.")"""
             break
         elif(input_cmd == "add"):
-            id = input("Task ID: ")
             description = input("Description: ")
             details = input("Details: ")
             due_date = input("Due Date (YYYY-MM-DD): ")
-            task = f'''
-            {{
-                "id": {id},
-                "description": "{description}",
-                "completed": false,
-                "due_date": "{due_date}",
-                "details": "{details}"
-            }}
-            '''
+            task = {
+                "description": description,
+                "details": details,
+                "due_date": due_date,
+                "completed": False
+            }
             storage.add_task(task)
         elif(input_cmd == "list"):
             storage.list_tasks()
@@ -61,10 +57,6 @@ def main():
         elif(input_cmd == "remove"):
             task_id = input("Enter Task ID to remove: ")
             storage.remove_task(int(task_id))
-        elif(input_cmd == "exit"):
-            storage.save_tasks(storage.get_tasks())
-            print("Tasks saved. Exiting.")
-            break
         else:
             print("Invalid command. Please try again.")
 
