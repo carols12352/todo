@@ -27,36 +27,53 @@ json 格式：
 """
 
 
-from storage import Storage, SQLStorage
-
+from storage import SQLStorage
+from dateutil import parser
 
 def main():
     while True:
         storage = SQLStorage()
         input_cmd = input("Command (add/list/done/remove/exit): ").strip().lower()
+
         if(input_cmd == "exit"):
             """storage.save_tasks(storage.get_tasks())
             print("Tasks saved. Exiting.")"""
             break
+
         elif(input_cmd == "add"):
             description = input("Description: ")
             details = input("Details: ")
-            due_date = input("Due Date (YYYY-MM-DD): ")
+            while True:
+                try:
+                    due_date = input("Due Date (YYYY-MM-DD): ")
+                    date_obj = parser.parse(due_date)
+                    formatted = date_obj.strftime("%Y-%m-%d")
+                    break
+                except Exception:
+                    print("Invalid date, please try again.")
+
             task = {
                 "description": description,
                 "details": details,
-                "due_date": due_date,
+                "due_date": formatted,
                 "completed": False
             }
             storage.add_task(task)
+
         elif(input_cmd == "list"):
             storage.list_tasks()
         elif(input_cmd == "done"):
             task_id = input("Enter Task ID to mark as done: ")
-            storage.done_task(int(task_id))
+            if(task_id.isdigit()):
+                storage.done_task(int(task_id))
+            else:
+                print("Invalid Task ID. Please enter a number.")
         elif(input_cmd == "remove"):
             task_id = input("Enter Task ID to remove: ")
-            storage.remove_task(int(task_id))
+            if(task_id.isdigit()):
+                storage.remove_task(int(task_id))
+            else:
+                print("Invalid Task ID. Please enter a number.")
         else:
             print("Invalid command. Please try again.")
 
