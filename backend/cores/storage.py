@@ -48,6 +48,24 @@ class SQLStorage:
             for row in rows:
                 print(row)
             logger.debug(f"Listed {len(rows)} tasks.")
+    
+    def list_task_flasks(self):
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM tasks")
+            rows = cursor.fetchall()
+            tasks = []
+            for row in rows:
+                task = {
+                    "id": row[0],
+                    "description": row[1],
+                    "details": row[2],
+                    "completed": bool(row[3]),
+                    "due_date": row[4]
+                }
+                tasks.append(task)
+            logger.debug(f"Listed {len(tasks)} tasks.")
+            return tasks
 
     def done_task(self, task_id):
         with self._connect() as conn:
@@ -56,10 +74,11 @@ class SQLStorage:
             if cursor.rowcount == 0:
                 print(f"Task ID {task_id} not found.")
                 logger.warning(f"Task ID {task_id} not found to mark as done.")
-                return
+                return False
             conn.commit()
             logger.debug(f"Task marked as done: ID={task_id}")
             print(f"Task ID {task_id} marked as done.")
+            return True
 
     def remove_task(self, task_id):
         with self._connect() as conn:
@@ -68,7 +87,8 @@ class SQLStorage:
             if cursor.rowcount == 0:
                 print(f"Task ID {task_id} not found.")
                 logger.warning(f"Task ID {task_id} not found for removal.")
-                return
+                return False
             conn.commit()
             logger.debug(f"Task removed: ID={task_id}")
             print(f"Task ID {task_id} removed.")
+            return True
