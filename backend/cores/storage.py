@@ -38,7 +38,9 @@ class SQLStorage:
                 task["due_date"]
             ))
             conn.commit()
-            logger.debug(f"Task added: {task}")
+            task_id = cursor.lastrowid
+            logger.debug(f"Task added: ID={task_id}")
+            return task_id
 
     def list_tasks(self):
         with self._connect() as conn:

@@ -1,6 +1,7 @@
 import flask
 from flask_cors import CORS
 from storage import SQLStorage
+from flask import request
 
 app = flask.Flask(__name__)
 CORS(app)
@@ -15,10 +16,15 @@ def index():
 
 @app.route("/api/add", methods=["POST"])
 def add_task():
-    data = flask.request.json
-    description = data.get("description", "")
-    details = data.get("details", "")
-    due_date = data.get("due_date", None)
+    if request.is_json:
+        data = flask.request.json
+        description = data.get("description", "")
+        details = data.get("details", "")
+        due_date = data.get("due_date", None)
+    else:
+        description = request.args.get("description")
+        details = request.args.get("details")
+        due_date = request.args.get("due_date")
     
     task = {
         "description": description,
@@ -33,12 +39,17 @@ def add_task():
 @app.route("/api/list", methods=["GET"])
 def list_tasks():
     tasks = storage.list_task_flasks()
+    if tasks is None:
+        return flask.jsonify("No tasks found"), 404
     return flask.jsonify({"tasks": tasks})
 
 @app.route("/api/done", methods=["POST"])
 def done_task():
-    data = flask.request.json or {}
-    task_id = data.get("id")
+    if request.is_json:
+        data = flask.request.json or {}
+        task_id = data.get("id")
+    else:
+        task_id = request.args.get("id")
 
     if task_id is None:
         return flask.jsonify({"error": "Task ID is required"}), 400
@@ -51,8 +62,11 @@ def done_task():
 
 @app.route("/api/remove", methods=["POST"])
 def remove_task():
-    data = flask.request.json or {}
-    task_id = data.get("id")
+    if request.is_json:
+        data = flask.request.json or {}
+        task_id = data.get("id")
+    else:
+        task_id = request.args.get("id")
 
     if task_id is None:
         return flask.jsonify({"error": "Task ID is required"}), 400
