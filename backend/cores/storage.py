@@ -38,7 +38,9 @@ class SQLStorage:
                 task["due_date"]
             ))
             conn.commit()
-            logger.debug(f"Task added: {task}")
+            task_id = cursor.lastrowid
+            logger.debug(f"Task added: ID={task_id}")
+            return task_id
 
     def list_tasks(self):
         with self._connect() as conn:
@@ -91,4 +93,17 @@ class SQLStorage:
             conn.commit()
             logger.debug(f"Task removed: ID={task_id}")
             print(f"Task ID {task_id} removed.")
+            return True
+
+    def reopen_task(self, task_id):
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE tasks SET completed = 0 WHERE id = ?", (task_id,))
+            if cursor.rowcount == 0:
+                print(f"Task ID {task_id} not found.")
+                logger.warning(f"Task ID {task_id} not found to reopen.")
+                return False
+            conn.commit()
+            logger.debug(f"Task reopened: ID={task_id}")
+            print(f"Task ID {task_id} reopened.")
             return True
