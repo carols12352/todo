@@ -10,11 +10,24 @@ Simply install it using
 pip install -r requirements.txt
 ```
 ## Server setup
-The server is hosted using python flask, so simply cd to the cores directory
+### Frontend setup
+The server is hosted using python flask, so simply cd to the cores directory in `backend/cores`
 ```
 python server.py
 ```
 The server should be up and running, should see output regarding the port and address of the server
+
+### Backend setup
+The server uses react and vite to run frontend, to start the server, simply just cd into `frontend` and then run
+```
+npm install
+```
+for depencencies(you only need once!) and use
+```
+npm run dev
+```
+to start the server.
+
 ## API calls 
 The todo list implemented some basic features such as
 - add: adds items to list and convert any valid date to DD-MM-YYYY to prevent further confusion
@@ -25,7 +38,7 @@ The todo list implemented some basic features such as
 as the flask server is hosted on 5000
 we would call it using
 ```
-127.0.0.1/api/apiname
+127.0.0.1:5000/api/apiname
 ```
 be aware that the api `add` `done` `remove` should have jsons posted to the method and list will just return the json format of the stuff inside.
 to call `add` or `done` or `remove`, use the curl or other methods such as postman or just react axiom if you prefer.

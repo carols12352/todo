@@ -77,6 +77,23 @@ def remove_task():
 
     return flask.jsonify({"message": f"Task {task_id} removed"})
 
+@app.route("/api/reopen", methods=["POST"])
+def reopen_task():
+    if request.is_json:
+        data = flask.request.json or {}
+        task_id = data.get("id")
+    else:
+        task_id = request.args.get("id")
+
+    if task_id is None:
+        return flask.jsonify({"error": "Task ID is required"}), 400
+
+    success = storage.reopen_task(task_id)
+    if not success:
+        return flask.jsonify({"error": "Task not found"}), 404
+
+    return flask.jsonify({"message": f"Task {task_id} reopened"})
+
 if __name__ == "__main__":
     print("Starting Flask server...")
     app.run(debug=True)
