@@ -50,3 +50,15 @@ or for just id
 ```
 curl -X POST http://127.0.0.1:5000/api/(done or remove) -H "Content-Type: application/json" -d '{\"id\": 5}'
 ```
+
+## Packaging (PyInstaller + DMG)
+
+### macOS
+1. Build mac app (uses tray_app_mac.py):
+   - `bash build_mac.sh`
+2. Build DMG:
+   - `bash dmg_mac.sh`
+
+### Windows
+1. Build windows app:
+   - `build_win.bat`

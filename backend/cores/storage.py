@@ -1,15 +1,14 @@
 import sqlite3
 import logging
-import os
 from logging.handlers import RotatingFileHandler
 from dbinit import get_db_path
+from app_paths import get_logs_dir
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-os.makedirs("logs", exist_ok=True)
 file_handler = RotatingFileHandler(
-    "logs/app.log", maxBytes=1024 * 1024, backupCount=5, encoding="utf-8"
+    f"{get_logs_dir()}/app.log", maxBytes=1024 * 1024, backupCount=5, encoding="utf-8"
 )
 file_handler.setFormatter(
     logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -29,13 +28,16 @@ class SQLStorage:
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO tasks (description, details, completed, due_date)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO tasks (description, details, completed, due_date, category, priority, color)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 task["description"],
-                task["details"],
-                task["completed"],
-                task["due_date"]
+                task.get("details", ""),
+                task.get("completed", False),
+                task.get("due_date"),
+                task.get("category", "personal"),
+                task.get("priority", "medium"),
+                task.get("color")
             ))
             conn.commit()
             task_id = cursor.lastrowid
@@ -63,7 +65,10 @@ class SQLStorage:
                     "description": row[1],
                     "details": row[2],
                     "completed": bool(row[3]),
-                    "due_date": row[4]
+                    "due_date": row[4],
+                    "category": row[5],
+                    "priority": row[6],
+                    "color": row[7]
                 }
                 tasks.append(task)
             logger.debug(f"Listed {len(tasks)} tasks.")
@@ -106,4 +111,22 @@ class SQLStorage:
             conn.commit()
             logger.debug(f"Task reopened: ID={task_id}")
             print(f"Task ID {task_id} reopened.")
+            return True
+
+    def update_task(self, task_id, description, details, due_date, category, priority, color):
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE tasks
+                SET description = ?, details = ?, due_date = ?, category = ?, priority = ?, color = ?
+                WHERE id = ?
+                """,
+                (description, details, due_date, category, priority, color, task_id)
+            )
+            if cursor.rowcount == 0:
+                logger.warning(f"Task ID {task_id} not found to update.")
+                return False
+            conn.commit()
+            logger.debug(f"Task updated: ID={task_id}")
             return True
