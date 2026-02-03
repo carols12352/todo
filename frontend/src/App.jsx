@@ -1,22 +1,209 @@
 import { useEffect, useMemo, useState } from 'react'
 import dayjs from 'dayjs'
-import { addTask, fetchTasks, markDone, removeTask, reopenTask } from './api'
+import {
+  addTask,
+  fetchTasks,
+  markDone,
+  removeTask,
+  reopenTask,
+  updateTask,
+  fetchSettings,
+  saveSettings,
+} from './api'
 import './App.css'
 
-const initialForm = { description: '', details: '', due_date: '' }
+const initialForm = {
+  description: '',
+  details: '',
+  due_date: '',
+  category: 'personal',
+  priority: 'medium',
+  color: '#0f766e',
+}
+
+const CATEGORY_LABELS = {
+  en: {
+    work: 'Work',
+    study: 'Study',
+    personal: 'Personal',
+  },
+  zh: {
+    work: '工作',
+    study: '学习',
+    personal: '个人',
+  },
+}
+
+const PRIORITY_LABELS = {
+  en: {
+    high: 'High',
+    medium: 'Medium',
+    low: 'Low',
+  },
+  zh: {
+    high: '高',
+    medium: '中',
+    low: '低',
+  },
+}
+
+const PRIORITY_COLORS = {
+  high: '#ef4444',
+  medium: '#f59e0b',
+  low: '#10b981',
+}
+
+const STRINGS = {
+  en: {
+    eyebrow: 'Daily Focus',
+    title: 'My Tasks',
+    subtitle: 'Stay on top of work, study, and personal goals.',
+    addTask: 'Add task',
+    titleLabel: 'Title*',
+    titlePlaceholder: 'Prepare weekly report',
+    details: 'Details',
+    detailsPlaceholder: 'Add notes or links...',
+    category: 'Category',
+    priority: 'Priority',
+    color: 'Color',
+    dueDate: 'Due date',
+    add: 'Add task',
+    saving: 'Saving...',
+    refresh: 'Refresh list',
+    tasks: 'Tasks',
+    itemsCount: (count, open) => `${count} items • ${open} open`,
+    all: 'All',
+    open: 'Open',
+    done: 'Done',
+    searchPlaceholder: 'Search title or details...',
+    allCategories: 'All categories',
+    allPriorities: 'All priorities',
+    loading: 'Loading...',
+    noTasks: 'No tasks yet.',
+    noDueDate: 'No due date',
+    due: 'Due',
+    complete: 'Complete',
+    reopen: 'Reopen',
+    edit: 'Edit',
+    delete: 'Delete',
+    save: 'Save',
+    cancel: 'Cancel',
+  },
+  zh: {
+    eyebrow: '日常管理',
+    title: '我的任务',
+    subtitle: '更清晰地管理工作、学习与生活。',
+    addTask: '新增任务',
+    titleLabel: '标题*',
+    titlePlaceholder: '准备周报',
+    details: '详情',
+    detailsPlaceholder: '可填写备注或链接...',
+    category: '分类',
+    priority: '优先级',
+    color: '颜色',
+    dueDate: '截止日期',
+    add: '添加任务',
+    saving: '保存中...',
+    refresh: '刷新列表',
+    tasks: '任务列表',
+    itemsCount: (count, open) => `${count} 条 • ${open} 未完成`,
+    all: '全部',
+    open: '未完成',
+    done: '已完成',
+    searchPlaceholder: '搜索标题或详情...',
+    allCategories: '全部分类',
+    allPriorities: '全部优先级',
+    loading: '加载中...',
+    noTasks: '暂无任务。',
+    noDueDate: '无截止',
+    due: '截止',
+    complete: '完成',
+    reopen: '重新打开',
+    edit: '编辑',
+    delete: '删除',
+    save: '保存',
+    cancel: '取消',
+  },
+}
 
 function App() {
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [language, setLanguage] = useState('en')
   const [form, setForm] = useState(initialForm)
   const [submitting, setSubmitting] = useState(false)
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [priorityFilter, setPriorityFilter] = useState('all')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [editingId, setEditingId] = useState(null)
+  const [editForm, setEditForm] = useState(initialForm)
+  const [editing, setEditing] = useState(false)
+  const [settingLang, setSettingLang] = useState(false)
 
   const hasTasks = useMemo(() => tasks.length > 0, [tasks])
+  const completedCount = useMemo(
+    () => tasks.filter((task) => task.completed).length,
+    [tasks]
+  )
+  const openCount = useMemo(
+    () => tasks.length - completedCount,
+    [tasks, completedCount]
+  )
+  const filteredTasks = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase()
+    return tasks.filter((task) => {
+      if (statusFilter === 'open' && task.completed) return false
+      if (statusFilter === 'done' && !task.completed) return false
+      if (categoryFilter !== 'all' && task.category !== categoryFilter) return false
+      if (priorityFilter !== 'all' && task.priority !== priorityFilter) return false
+      if (!keyword) return true
+      const haystack = `${task.description} ${task.details || ''}`.toLowerCase()
+      return haystack.includes(keyword)
+    })
+  }, [tasks, statusFilter, categoryFilter, priorityFilter, searchTerm])
+
+  const groupedTasks = useMemo(() => {
+    const groups = {
+      work: [],
+      study: [],
+      personal: [],
+    }
+    filteredTasks.forEach((task) => {
+      const key = task.category || 'personal'
+      if (!groups[key]) {
+        groups[key] = []
+      }
+      groups[key].push(task)
+    })
+    return groups
+  }, [filteredTasks])
 
   useEffect(() => {
+    loadSettings()
     loadTasks()
   }, [])
+
+  async function loadSettings() {
+    try {
+      const data = await fetchSettings()
+      if (data?.language) {
+        setLanguage(data.language)
+      }
+    } catch (err) {
+      setLanguage('en')
+    }
+  }
+
+  async function persistLanguage(nextLanguage) {
+    setLanguage(nextLanguage)
+    try {
+      await saveSettings(nextLanguage)
+    } catch (err) {
+      // Ignore write failures; UI still updates.
+    }
+  }
 
   async function loadTasks() {
     setLoading(true)
@@ -36,6 +223,11 @@ function App() {
     setForm((prev) => ({ ...prev, [name]: value }))
   }
 
+  function handleEditChange(event) {
+    const { name, value } = event.target
+    setEditForm((prev) => ({ ...prev, [name]: value }))
+  }
+
   async function handleAdd(event) {
     event.preventDefault()
     if (!form.description.trim()) {
@@ -49,6 +241,9 @@ function App() {
         description: form.description.trim(),
         details: form.details.trim(),
         due_date: form.due_date || null,
+        category: form.category,
+        priority: form.priority,
+        color: form.color || null,
       })
       setForm(initialForm)
       await loadTasks()
@@ -89,57 +284,185 @@ function App() {
     }
   }
 
+  function startEdit(task) {
+    setEditingId(task.id)
+    setEditForm({
+      description: task.description || '',
+      details: task.details || '',
+      due_date: task.due_date || '',
+      category: task.category || 'personal',
+      priority: task.priority || 'medium',
+      color: task.color || PRIORITY_COLORS[task.priority] || '#0f766e',
+    })
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditForm(initialForm)
+  }
+
+  async function saveEdit(taskId) {
+    if (!editForm.description.trim()) {
+      setError('Description is required')
+      return
+    }
+    setEditing(true)
+    setError('')
+    try {
+      await updateTask({
+        id: taskId,
+        description: editForm.description.trim(),
+        details: editForm.details.trim(),
+        due_date: editForm.due_date || null,
+        category: editForm.category,
+        priority: editForm.priority,
+        color: editForm.color || null,
+      })
+      setEditingId(null)
+      setEditForm(initialForm)
+      await loadTasks()
+    } catch (err) {
+      setError(err.message || 'Failed to update task')
+    } finally {
+      setEditing(false)
+    }
+  }
+
+  function getTagColor(task) {
+    if (task.color) return task.color
+    if (task.priority && PRIORITY_COLORS[task.priority]) {
+      return PRIORITY_COLORS[task.priority]
+    }
+    return '#0f766e'
+  }
+
+  const t = (key, ...args) => {
+    const dict = STRINGS[language] || STRINGS.en
+    const value = dict[key] ?? STRINGS.en[key] ?? key
+    return typeof value === 'function' ? value(...args) : value
+  }
+
+  const categoryLabels = CATEGORY_LABELS[language] || CATEGORY_LABELS.en
+  const priorityLabels = PRIORITY_LABELS[language] || PRIORITY_LABELS.en
+
   return (
     <div className="page">
       <header className="header">
         <div>
-          <p className="eyebrow">Flask + SQLite</p>
-          <h1>Todo Dashboard</h1>
-          <p className="subtitle">
-            Add tasks, mark them done, or remove them via the Flask API.
-          </p>
+          <p className="eyebrow">{t('eyebrow')}</p>
+          <h1>{t('title')}</h1>
+          <p className="subtitle">{t('subtitle')}</p>
+        </div>
+        <div className="summary">
+          <div className="summary-card">
+            <p className="summary-label">{t('open')}</p>
+            <p className="summary-value">{openCount}</p>
+          </div>
+          <div className="summary-card muted-card">
+            <p className="summary-label">{t('done')}</p>
+            <p className="summary-value">{completedCount}</p>
+          </div>
         </div>
       </header>
 
       <section className="panel">
-        <h2>Add a task</h2>
+        <div className="panel-header">
+          <h2>{t('settings')}</h2>
+        </div>
+        <div className="actions">
+          <button
+            type="button"
+            className="ghost"
+            onClick={async () => {
+              if (settingLang) return
+              setSettingLang(true)
+              await persistLanguage('en')
+              setSettingLang(false)
+            }}
+          >
+            English
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={async () => {
+              if (settingLang) return
+              setSettingLang(true)
+              await persistLanguage('zh')
+              setSettingLang(false)
+            }}
+          >
+            中文
+          </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>{t('addTask')}</h2>
         <form className="form" onSubmit={handleAdd}>
           <label className="field">
-            <span>Description*</span>
+            <span>{t('titleLabel')}</span>
             <input
               type="text"
               name="description"
               value={form.description}
               onChange={handleChange}
-              placeholder="Walk the dog"
+              placeholder={t('titlePlaceholder')}
               required
             />
           </label>
           <label className="field">
-            <span>Details</span>
+            <span>{t('details')}</span>
             <textarea
               name="details"
               value={form.details}
               onChange={handleChange}
-              placeholder="Add any notes…"
+              placeholder={t('detailsPlaceholder')}
               rows={3}
             />
           </label>
-          <label className="field">
-            <span>Due date</span>
-            <input
-              type="date"
-              name="due_date"
-              value={form.due_date}
-              onChange={handleChange}
-            />
-          </label>
+          <div className="row">
+            <label className="field">
+              <span>{t('category')}</span>
+              <select name="category" value={form.category} onChange={handleChange}>
+                <option value="work">{categoryLabels.work}</option>
+                <option value="study">{categoryLabels.study}</option>
+                <option value="personal">{categoryLabels.personal}</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>{t('priority')}</span>
+              <select name="priority" value={form.priority} onChange={handleChange}>
+                <option value="high">{priorityLabels.high}</option>
+                <option value="medium">{priorityLabels.medium}</option>
+                <option value="low">{priorityLabels.low}</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>{t('color')}</span>
+              <input
+                type="color"
+                name="color"
+                value={form.color}
+                onChange={handleChange}
+              />
+            </label>
+            <label className="field">
+              <span>{t('dueDate')}</span>
+              <input
+                type="date"
+                name="due_date"
+                value={form.due_date}
+                onChange={handleChange}
+              />
+            </label>
+          </div>
           <div className="actions">
             <button type="submit" disabled={submitting}>
-              {submitting ? 'Saving…' : 'Add task'}
+              {submitting ? t('saving') : t('add')}
             </button>
             <button type="button" className="ghost" onClick={loadTasks}>
-              Refresh list
+              {t('refresh')}
             </button>
           </div>
         </form>
@@ -147,54 +470,237 @@ function App() {
 
       <section className="panel">
         <div className="panel-header">
-          <h2>Tasks</h2>
-          {loading && <span className="pill">Loading…</span>}
+          <div>
+            <h2>{t('tasks')}</h2>
+            <p className="muted small">
+              {t('itemsCount', filteredTasks.length, openCount)}
+            </p>
+          </div>
+          <div className="filters">
+            <button
+              type="button"
+              className={`filter ${statusFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setStatusFilter('all')}
+            >
+              {t('all')}
+            </button>
+            <button
+              type="button"
+              className={`filter ${statusFilter === 'open' ? 'active' : ''}`}
+              onClick={() => setStatusFilter('open')}
+            >
+              {t('open')}
+            </button>
+            <button
+              type="button"
+              className={`filter ${statusFilter === 'done' ? 'active' : ''}`}
+              onClick={() => setStatusFilter('done')}
+            >
+              {t('done')}
+            </button>
+          </div>
+        </div>
+        <div className="toolbar">
+          <input
+            className="search"
+            placeholder={t('searchPlaceholder')}
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+          />
+          <select
+            className="select"
+            value={categoryFilter}
+            onChange={(event) => setCategoryFilter(event.target.value)}
+          >
+            <option value="all">{t('allCategories')}</option>
+            <option value="work">{categoryLabels.work}</option>
+            <option value="study">{categoryLabels.study}</option>
+            <option value="personal">{categoryLabels.personal}</option>
+          </select>
+          <select
+            className="select"
+            value={priorityFilter}
+            onChange={(event) => setPriorityFilter(event.target.value)}
+          >
+            <option value="all">{t('allPriorities')}</option>
+            <option value="high">{priorityLabels.high}</option>
+            <option value="medium">{priorityLabels.medium}</option>
+            <option value="low">{priorityLabels.low}</option>
+          </select>
+          {loading && <span className="pill">{t('loading')}</span>}
         </div>
         {error && <div className="error">{error}</div>}
-        {!loading && !hasTasks && <p className="muted">No tasks yet.</p>}
-        <div className="task-grid">
-          {tasks.map((task) => {
-            const due = task.due_date
-              ? dayjs(task.due_date).format('YYYY-MM-DD')
-              : 'No due date'
+        {!loading && !hasTasks && <p className="muted">{t('noTasks')}</p>}
+        {!loading &&
+          hasTasks &&
+          Object.entries(groupedTasks).map(([group, items]) => {
+            if (items.length === 0) {
+              return null
+            }
             return (
-              <article
-                key={task.id}
-                className={`task ${task.completed ? 'done' : ''}`}
-              >
-                <div className="task-head">
-                  <div>
-                    <p className="task-id">#{task.id}</p>
-                    <h3>{task.description}</h3>
+              <div className="group" key={group}>
+                <div className="group-header">
+                  <div className="group-title">
+                    <span className="group-dot" />
+                    <h3>{categoryLabels[group] || group}</h3>
                   </div>
-                  <span className="pill">
-                    {task.completed ? 'Done' : 'Open'}
-                  </span>
+                  <span className="pill subtle">{items.length}</span>
                 </div>
-                {task.details && <p className="muted">{task.details}</p>}
-                <p className="due">Due: {due}</p>
-                <div className="task-actions">
-                  {!task.completed ? (
-                    <button type="button" onClick={() => handleDone(task.id)}>
-                      Mark done
-                    </button>
-                  ) : (
-                    <button type="button" onClick={() => handleReopen(task.id)}>
-                      Reopen
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() => handleRemove(task.id)}
-                  >
-                    Remove
-                  </button>
+                <div className="task-grid">
+                  {items.map((task) => {
+                    const due = task.due_date
+                      ? dayjs(task.due_date).format('YYYY-MM-DD')
+                      : t('noDueDate')
+                    const isEditing = editingId === task.id
+                    const tagColor = getTagColor(task)
+                    return (
+                      <article
+                        key={task.id}
+                        className={`task ${task.completed ? 'done' : ''}`}
+                      >
+                        <div className="task-head">
+                          <div>
+                            <p className="task-id">#{task.id}</p>
+                            {!isEditing ? (
+                              <h3>{task.description}</h3>
+                            ) : (
+                              <input
+                                className="inline-input"
+                                name="description"
+                                value={editForm.description}
+                                onChange={handleEditChange}
+                              />
+                            )}
+                          </div>
+                          <span className="pill">
+                            {task.completed ? t('done') : t('open')}
+                          </span>
+                        </div>
+                        <div className="meta">
+                          <span
+                            className="tag"
+                            style={{ background: tagColor }}
+                          >
+                            {priorityLabels[task.priority] || priorityLabels.medium}
+                          </span>
+                          <span className="meta-text">{t('due')} {due}</span>
+                        </div>
+                        {!isEditing ? (
+                          task.details && <p className="muted">{task.details}</p>
+                        ) : (
+                          <textarea
+                            className="inline-textarea"
+                            name="details"
+                            value={editForm.details}
+                            onChange={handleEditChange}
+                            rows={3}
+                          />
+                        )}
+                        {isEditing && (
+                          <div className="row">
+                            <label className="field">
+                              <span>{t('category')}</span>
+                              <select
+                                name="category"
+                                value={editForm.category}
+                                onChange={handleEditChange}
+                              >
+                                <option value="work">{categoryLabels.work}</option>
+                                <option value="study">{categoryLabels.study}</option>
+                                <option value="personal">{categoryLabels.personal}</option>
+                              </select>
+                            </label>
+                            <label className="field">
+                              <span>{t('priority')}</span>
+                              <select
+                                name="priority"
+                                value={editForm.priority}
+                                onChange={handleEditChange}
+                              >
+                                <option value="high">{priorityLabels.high}</option>
+                                <option value="medium">{priorityLabels.medium}</option>
+                                <option value="low">{priorityLabels.low}</option>
+                              </select>
+                            </label>
+                            <label className="field">
+                              <span>{t('color')}</span>
+                              <input
+                                type="color"
+                                name="color"
+                                value={editForm.color}
+                                onChange={handleEditChange}
+                              />
+                            </label>
+                            <label className="field">
+                              <span>{t('dueDate')}</span>
+                              <input
+                                type="date"
+                                name="due_date"
+                                value={editForm.due_date}
+                                onChange={handleEditChange}
+                              />
+                            </label>
+                          </div>
+                        )}
+                        <div className="task-actions">
+                          {!isEditing ? (
+                            <>
+                              {!task.completed ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDone(task.id)}
+                                >
+                                  {t('complete')}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleReopen(task.id)}
+                                >
+                                  {t('reopen')}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="ghost"
+                                onClick={() => startEdit(task)}
+                              >
+                                {t('edit')}
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost danger"
+                                onClick={() => handleRemove(task.id)}
+                              >
+                                {t('delete')}
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => saveEdit(task.id)}
+                                disabled={editing}
+                              >
+                                {editing ? t('saving') : t('save')}
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost"
+                                onClick={cancelEdit}
+                              >
+                                {t('cancel')}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </article>
+                    )
+                  })}
                 </div>
-              </article>
+              </div>
             )
           })}
-        </div>
       </section>
     </div>
   )

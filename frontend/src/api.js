@@ -48,3 +48,26 @@ export async function reopenTask(id) {
   });
   return handleResponse(res);
 }
+
+export async function updateTask(task) {
+  const res = await fetch(`${API_BASE}/api/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(task),
+  });
+  return handleResponse(res);
+}
+
+export async function fetchSettings() {
+  const res = await fetch(`${API_BASE}/api/settings`);
+  return handleResponse(res);
+}
+
+export async function saveSettings(language) {
+  const res = await fetch(`${API_BASE}/api/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language }),
+  });
+  return handleResponse(res);
+}

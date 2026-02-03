@@ -4,6 +4,8 @@ __pycache__/
 .env
 *.db
 todoenv/
+.python-version
+/src-tauri/
 
 # Logs
 logs
@@ -29,3 +31,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+/mywinvenv/
+/frontend_dist/
+/dmg/
