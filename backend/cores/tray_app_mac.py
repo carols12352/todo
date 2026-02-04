@@ -4,6 +4,7 @@ import subprocess
 import webbrowser
 import time
 import json
+from datetime import date, timedelta
 try:
     import tkinter as tk
     from tkinter import simpledialog, messagebox
@@ -48,11 +49,13 @@ last_backend_error = ""
 last_frontend_error = ""
 USE_TK = sys.platform != "darwin"
 tray_icon = None
+last_language = None
 
 TRAY_LABELS = {
     "en": {
         "quick_add": "Quick add",
         "settings": "Settings",
+        "language": "Language",
         "open_ui": "Open UI",
         "quit": "Quit",
         "language_en": "English",
@@ -61,6 +64,7 @@ TRAY_LABELS = {
     "zh": {
         "quick_add": "快速添加",
         "settings": "设置",
+        "language": "语言",
         "open_ui": "打开界面",
         "quit": "退出",
         "language_en": "English",
@@ -107,6 +111,19 @@ def _mac_prompt(message):
     return result.stdout.strip()
 
 
+def _mac_choose_from_list(message, options):
+    options_list = ", ".join(_apple_script_quote(opt) for opt in options)
+    script = (
+        f"set choices to {{{options_list}}}\n"
+        f"set chosen to choose from list choices with prompt {_apple_script_quote(message)}\n"
+        f"if chosen is false then return \"\" else return item 1 of chosen as string"
+    )
+    result = _osascript(script)
+    if result is None or result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
 def create_icon_image():
     candidates = [ICON_PATH]
     if not getattr(sys, "frozen", False):
@@ -136,6 +153,36 @@ def create_icon_image():
     draw.rounded_rectangle([6, 6, 58, 58], radius=12, fill=(29, 78, 216, 255))
     draw.text((20, 18), "TD", fill=(255, 255, 255, 255))
     return image
+
+
+def apply_macos_template(icon):
+    try:
+        import AppKit  # type: ignore
+        status_item = getattr(icon, "_status_item", None)
+        if not status_item:
+            return
+        button = status_item.button()
+        if not button:
+            return
+        image = button.image()
+        if image:
+            image.setTemplate_(True)
+    except Exception:
+        pass
+
+
+def ensure_macos_template(icon, retries=10, delay=0.2):
+    if sys.platform != "darwin":
+        return
+    for _ in range(retries):
+        try:
+            apply_macos_template(icon)
+            status_item = getattr(icon, "_status_item", None)
+            if status_item and status_item.button() and status_item.button().image():
+                return
+        except Exception:
+            pass
+        time.sleep(delay)
 
 
 def start_server():
@@ -329,6 +376,36 @@ def api_add_task(description, details="", due_date=None):
         headers={"Content-Type": "application/json"},
         method="POST"
     )
+    with urlrequest.urlopen(req, timeout=5) as response:
+        payload = response.read().decode("utf-8") or "{}"
+    try:
+        return json.loads(payload).get("task_id")
+    except Exception:
+        return None
+
+
+def api_mark_done(task_id):
+    payload = {"id": task_id}
+    data = json.dumps(payload).encode("utf-8")
+    req = urlrequest.Request(
+        f"{API_BASE}/done",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urlrequest.urlopen(req, timeout=5):
+        pass
+
+
+def api_set_language(lang):
+    payload = {"language": lang}
+    data = json.dumps(payload).encode("utf-8")
+    req = urlrequest.Request(
+        f"{API_BASE}/settings",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
     with urlrequest.urlopen(req, timeout=5):
         pass
 
@@ -351,8 +428,23 @@ def prompt_quick_add(root):
         if not description:
             return None
         details = _mac_prompt("Details (optional):")
-        due_date = _mac_prompt("Due date (YYYY-MM-DD, optional):")
-        return description.strip(), (details or "").strip(), (due_date or "").strip() or None
+        options = ["Today", "Tomorrow", "Next 3 days", "Next week", "Custom", "No due date"]
+        choice = _mac_choose_from_list("Choose a due date shortcut:", options)
+        due_date = ""
+        if not choice:
+            due_date = _mac_prompt("Due date (YYYY-MM-DD, optional):") or ""
+            return description.strip(), (details or "").strip(), due_date.strip() or None
+        if choice == "Today":
+            due_date = date.today().isoformat()
+        elif choice == "Tomorrow":
+            due_date = (date.today() + timedelta(days=1)).isoformat()
+        elif choice == "Next 3 days":
+            due_date = (date.today() + timedelta(days=3)).isoformat()
+        elif choice == "Next week":
+            due_date = (date.today() + timedelta(days=7)).isoformat()
+        elif choice == "Custom":
+            due_date = _mac_prompt("Due date (YYYY-MM-DD, optional):") or ""
+        return description.strip(), (details or "").strip(), due_date.strip() or None
     description = simpledialog.askstring("Quick Add", "Task description:", parent=root)
     if not description:
         return None
@@ -372,7 +464,26 @@ def quick_add_flow():
         description, details, due_date = result
         if not description:
             return
-        api_add_task(description, details, due_date)
+        if due_date:
+            try:
+                due_obj = date.fromisoformat(due_date)
+                if due_obj < date.today():
+                    confirm = _osascript(
+                        f'display dialog {_apple_script_quote("Due date is in the past. Add anyway and mark it done?")} '
+                        f'with title {_apple_script_quote("TodoList")} buttons {{"Cancel", "Add"}} default button 2'
+                    )
+                    if confirm is None or confirm.returncode != 0:
+                        return
+            except Exception:
+                pass
+        task_id = api_add_task(description, details, due_date)
+        if due_date:
+            try:
+                due_obj = date.fromisoformat(due_date)
+                if due_obj < date.today() and task_id is not None:
+                    api_mark_done(task_id)
+            except Exception:
+                pass
     except urlerror.URLError as exc:
         show_error(f"Failed to add task:\n{exc}")
     except Exception as exc:
@@ -391,6 +502,10 @@ def quick_add_task(icon, _item):
 
 def set_language(lang):
     save_settings({"language": lang})
+    try:
+        api_set_language(lang)
+    except Exception:
+        pass
     refresh_menu()
 
 
@@ -403,13 +518,25 @@ def get_language():
 
 def build_menu():
     labels = TRAY_LABELS[get_language()]
+    current_lang = get_language()
     language_menu = pystray.Menu(
-        item(labels["language_en"], lambda _icon, _item: set_language("en")),
-        item(labels["language_zh"], lambda _icon, _item: set_language("zh"))
+        item(
+            labels["language_en"],
+            lambda _icon, _item: set_language("en"),
+            checked=lambda _item: current_lang == "en"
+        ),
+        item(
+            labels["language_zh"],
+            lambda _icon, _item: set_language("zh"),
+            checked=lambda _item: current_lang == "zh"
+        )
+    )
+    settings_menu = pystray.Menu(
+        item(labels["language"], language_menu)
     )
     return pystray.Menu(
         item(labels["quick_add"], quick_add_task),
-        item(labels["settings"], language_menu),
+        item(labels["settings"], settings_menu),
         item(labels["open_ui"], lambda _icon, _item: open_frontend()),
         item(labels["quit"], quit_app)
     )
@@ -424,6 +551,21 @@ def refresh_menu():
         tray_icon.update_menu()
     except Exception:
         pass
+
+
+def watch_language_changes(interval_seconds=2.0):
+    global last_language
+    while True:
+        try:
+            current = get_language()
+            if last_language is None:
+                last_language = current
+            elif current != last_language:
+                last_language = current
+                refresh_menu()
+        except Exception:
+            pass
+        time.sleep(interval_seconds)
 
 
 def quit_app(icon, _item):
@@ -488,6 +630,9 @@ def start_services(show_success):
 def main():
     global tray_icon
     tray_icon = pystray.Icon("todolist", create_icon_image(), "TodoList", build_menu())
+    if sys.platform == "darwin":
+        threading.Thread(target=lambda: ensure_macos_template(tray_icon), daemon=True).start()
+    threading.Thread(target=watch_language_changes, daemon=True).start()
     if USE_TK:
         threading.Thread(target=tray_icon.run, daemon=True).start()
         init_tk_root()

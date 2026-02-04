@@ -4,6 +4,7 @@ import subprocess
 import webbrowser
 import time
 import json
+from datetime import date, timedelta
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 import threading
@@ -39,11 +40,13 @@ last_backend_error = ""
 last_frontend_error = ""
 USE_TK = True
 tray_icon = None
+last_language = None
 
 TRAY_LABELS = {
     "en": {
         "quick_add": "Quick add",
         "settings": "Settings",
+        "language": "Language",
         "open_ui": "Open UI",
         "quit": "Quit",
         "language_en": "English",
@@ -52,6 +55,7 @@ TRAY_LABELS = {
     "zh": {
         "quick_add": "快速添加",
         "settings": "设置",
+        "language": "语言",
         "open_ui": "打开界面",
         "quit": "退出",
         "language_en": "English",
@@ -254,6 +258,36 @@ def api_add_task(description, details="", due_date=None):
         headers={"Content-Type": "application/json"},
         method="POST"
     )
+    with urlrequest.urlopen(req, timeout=5) as response:
+        payload = response.read().decode("utf-8") or "{}"
+    try:
+        return json.loads(payload).get("task_id")
+    except Exception:
+        return None
+
+
+def api_mark_done(task_id):
+    payload = {"id": task_id}
+    data = json.dumps(payload).encode("utf-8")
+    req = urlrequest.Request(
+        f"{API_BASE}/done",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urlrequest.urlopen(req, timeout=5):
+        pass
+
+
+def api_set_language(lang):
+    payload = {"language": lang}
+    data = json.dumps(payload).encode("utf-8")
+    req = urlrequest.Request(
+        f"{API_BASE}/settings",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
     with urlrequest.urlopen(req, timeout=5):
         pass
 
@@ -268,13 +302,62 @@ def init_tk_root():
     return tk_root
 
 
+def _tk_choose_from_list(root, title, message, options):
+    if root is None:
+        return ""
+    result = {"value": ""}
+    dialog = tk.Toplevel(root)
+    dialog.title(title)
+    dialog.resizable(False, False)
+    dialog.transient(root)
+    dialog.grab_set()
+
+    label = tk.Label(dialog, text=message)
+    label.pack(padx=14, pady=(12, 6))
+
+    choice = tk.StringVar(dialog, value=options[0])
+    menu = tk.OptionMenu(dialog, choice, *options)
+    menu.pack(padx=14, pady=6, fill="x")
+
+    button_frame = tk.Frame(dialog)
+    button_frame.pack(padx=14, pady=(6, 12), fill="x")
+
+    def on_ok():
+        result["value"] = choice.get()
+        dialog.destroy()
+
+    def on_cancel():
+        result["value"] = ""
+        dialog.destroy()
+
+    ok_btn = tk.Button(button_frame, text="OK", command=on_ok)
+    ok_btn.pack(side="right", padx=(6, 0))
+    cancel_btn = tk.Button(button_frame, text="Cancel", command=on_cancel)
+    cancel_btn.pack(side="right")
+
+    dialog.wait_window()
+    return result["value"]
+
+
 def prompt_quick_add(root):
     description = simpledialog.askstring("Quick Add", "Task description:", parent=root)
     if not description:
         return None
 
     details = simpledialog.askstring("Quick Add", "Details (optional):", parent=root)
-    due_date = simpledialog.askstring("Quick Add", "Due date (YYYY-MM-DD, optional):", parent=root)
+    options = ["Today", "Tomorrow", "Next 3 days", "Next week", "Custom", "No due date"]
+    choice = _tk_choose_from_list(root, "Quick Add", "Choose a due date shortcut:", options)
+    due_date = ""
+    if choice == "Today":
+        due_date = date.today().isoformat()
+    elif choice == "Tomorrow":
+        due_date = (date.today() + timedelta(days=1)).isoformat()
+    elif choice == "Next 3 days":
+        due_date = (date.today() + timedelta(days=3)).isoformat()
+    elif choice == "Next week":
+        due_date = (date.today() + timedelta(days=7)).isoformat()
+    elif choice == "Custom":
+        due_date = simpledialog.askstring("Quick Add", "Due date (YYYY-MM-DD, optional):", parent=root) or ""
 
     return description.strip(), (details or "").strip(), (due_date or "").strip() or None
 
@@ -288,7 +371,27 @@ def quick_add_flow():
         description, details, due_date = result
         if not description:
             return
-        api_add_task(description, details, due_date)
+        if due_date:
+            try:
+                due_obj = date.fromisoformat(due_date)
+                if due_obj < date.today():
+                    confirm = messagebox.askyesno(
+                        "TodoList",
+                        "Due date is in the past. Add anyway and mark it done?",
+                        parent=root
+                    )
+                    if not confirm:
+                        return
+            except Exception:
+                pass
+        task_id = api_add_task(description, details, due_date)
+        if due_date:
+            try:
+                due_obj = date.fromisoformat(due_date)
+                if due_obj < date.today() and task_id is not None:
+                    api_mark_done(task_id)
+            except Exception:
+                pass
     except urlerror.URLError as exc:
         messagebox.showerror("TodoList", f"Failed to add task:\n{exc}")
     except Exception as exc:
@@ -304,6 +407,10 @@ def quick_add_task(icon, _item):
 
 def set_language(lang):
     save_settings({"language": lang})
+    try:
+        api_set_language(lang)
+    except Exception:
+        pass
     refresh_menu()
 
 
@@ -316,13 +423,25 @@ def get_language():
 
 def build_menu():
     labels = TRAY_LABELS[get_language()]
+    current_lang = get_language()
     language_menu = pystray.Menu(
-        item(labels["language_en"], lambda _icon, _item: set_language("en")),
-        item(labels["language_zh"], lambda _icon, _item: set_language("zh"))
+        item(
+            labels["language_en"],
+            lambda _icon, _item: set_language("en"),
+            checked=lambda _item: current_lang == "en"
+        ),
+        item(
+            labels["language_zh"],
+            lambda _icon, _item: set_language("zh"),
+            checked=lambda _item: current_lang == "zh"
+        )
+    )
+    settings_menu = pystray.Menu(
+        item(labels["language"], language_menu)
     )
     return pystray.Menu(
         item(labels["quick_add"], quick_add_task),
-        item(labels["settings"], language_menu),
+        item(labels["settings"], settings_menu),
         item(labels["open_ui"], lambda _icon, _item: open_frontend()),
         item(labels["quit"], quit_app)
     )
@@ -337,6 +456,21 @@ def refresh_menu():
         tray_icon.update_menu()
     except Exception:
         pass
+
+
+def watch_language_changes(interval_seconds=2.0):
+    global last_language
+    while True:
+        try:
+            current = get_language()
+            if last_language is None:
+                last_language = current
+            elif current != last_language:
+                last_language = current
+                refresh_menu()
+        except Exception:
+            pass
+        time.sleep(interval_seconds)
 
 
 def quit_app(icon, _item):
@@ -401,6 +535,7 @@ def start_services(show_success):
 def main():
     global tray_icon
     tray_icon = pystray.Icon("todolist", create_icon_image(), "TodoList", build_menu())
+    threading.Thread(target=watch_language_changes, daemon=True).start()
     threading.Thread(target=tray_icon.run, daemon=True).start()
     init_tk_root()
     tk_root.after(0, lambda: start_services(show_success=False))

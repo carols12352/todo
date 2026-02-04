@@ -3,5 +3,3 @@ flask
 flask-cors
 Pillow
 pystray
-pytest
-PySide6

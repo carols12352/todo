@@ -58,6 +58,7 @@ const STRINGS = {
     eyebrow: 'Daily Focus',
     title: 'My Tasks',
     subtitle: 'Stay on top of work, study, and personal goals.',
+    language: 'Language',
     addTask: 'Add task',
     titleLabel: 'Title*',
     titlePlaceholder: 'Prepare weekly report',
@@ -66,6 +67,13 @@ const STRINGS = {
     category: 'Category',
     priority: 'Priority',
     color: 'Color',
+    quickDate: 'Quick date',
+    quickDateNone: 'No shortcut',
+    quickDateCustom: 'Custom',
+    today: 'Today',
+    tomorrow: 'Tomorrow',
+    next3Days: 'Next 3 days',
+    nextWeek: 'Next week',
     dueDate: 'Due date',
     add: 'Add task',
     saving: 'Saving...',
@@ -88,11 +96,13 @@ const STRINGS = {
     delete: 'Delete',
     save: 'Save',
     cancel: 'Cancel',
+    pastDueConfirm: 'Due date is in the past. Add anyway and mark it done?',
   },
   zh: {
     eyebrow: '日常管理',
     title: '我的任务',
     subtitle: '更清晰地管理工作、学习与生活。',
+    language: '语言',
     addTask: '新增任务',
     titleLabel: '标题*',
     titlePlaceholder: '准备周报',
@@ -101,6 +111,13 @@ const STRINGS = {
     category: '分类',
     priority: '优先级',
     color: '颜色',
+    quickDate: '快捷日期',
+    quickDateNone: '不使用',
+    quickDateCustom: '自定义',
+    today: '今天',
+    tomorrow: '明天',
+    next3Days: '未来三天',
+    nextWeek: '下周',
     dueDate: '截止日期',
     add: '添加任务',
     saving: '保存中...',
@@ -123,6 +140,7 @@ const STRINGS = {
     delete: '删除',
     save: '保存',
     cancel: '取消',
+    pastDueConfirm: '截止日期早于今天，是否仍要添加并自动标记为完成？',
   },
 }
 
@@ -141,6 +159,7 @@ function App() {
   const [editForm, setEditForm] = useState(initialForm)
   const [editing, setEditing] = useState(false)
   const [settingLang, setSettingLang] = useState(false)
+  const [quickDatePreset, setQuickDatePreset] = useState('')
 
   const hasTasks = useMemo(() => tasks.length > 0, [tasks])
   const completedCount = useMemo(
@@ -206,6 +225,7 @@ function App() {
   }
 
   async function loadTasks() {
+    const scrollY = window.scrollY
     setLoading(true)
     setError('')
     try {
@@ -215,6 +235,9 @@ function App() {
       setError(err.message || 'Failed to load tasks')
     } finally {
       setLoading(false)
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: scrollY })
+      })
     }
   }
 
@@ -237,7 +260,19 @@ function App() {
     setSubmitting(true)
     setError('')
     try {
-      await addTask({
+      const today = dayjs().startOf('day')
+      const hasPastDue =
+        form.due_date && dayjs(form.due_date).isBefore(today, 'day')
+      let markDoneAfterAdd = false
+      if (hasPastDue) {
+        const confirmPastDue = window.confirm(t('pastDueConfirm'))
+        if (!confirmPastDue) {
+          return
+        }
+        markDoneAfterAdd = true
+      }
+
+      const result = await addTask({
         description: form.description.trim(),
         details: form.details.trim(),
         due_date: form.due_date || null,
@@ -245,7 +280,11 @@ function App() {
         priority: form.priority,
         color: form.color || null,
       })
+      if (markDoneAfterAdd && result?.task_id) {
+        await markDone(result.task_id)
+      }
       setForm(initialForm)
+      setQuickDatePreset('')
       await loadTasks()
     } catch (err) {
       setError(err.message || 'Failed to add task')
@@ -344,6 +383,17 @@ function App() {
 
   const categoryLabels = CATEGORY_LABELS[language] || CATEGORY_LABELS.en
   const priorityLabels = PRIORITY_LABELS[language] || PRIORITY_LABELS.en
+  const quickDateOptions = useMemo(() => {
+    const today = dayjs()
+    return [
+      { value: '', label: t('quickDateNone') },
+      { value: today.format('YYYY-MM-DD'), label: t('today') },
+      { value: today.add(1, 'day').format('YYYY-MM-DD'), label: t('tomorrow') },
+      { value: today.add(3, 'day').format('YYYY-MM-DD'), label: t('next3Days') },
+      { value: today.add(7, 'day').format('YYYY-MM-DD'), label: t('nextWeek') },
+      { value: 'custom', label: t('quickDateCustom') },
+    ]
+  }, [language])
 
   return (
     <div className="page">
@@ -353,49 +403,36 @@ function App() {
           <h1>{t('title')}</h1>
           <p className="subtitle">{t('subtitle')}</p>
         </div>
-        <div className="summary">
-          <div className="summary-card">
-            <p className="summary-label">{t('open')}</p>
-            <p className="summary-value">{openCount}</p>
+        <div className="header-actions">
+          <div className="summary">
+            <div className="summary-card">
+              <p className="summary-label">{t('open')}</p>
+              <p className="summary-value">{openCount}</p>
+            </div>
+            <div className="summary-card muted-card">
+              <p className="summary-label">{t('done')}</p>
+              <p className="summary-value">{completedCount}</p>
+            </div>
           </div>
-          <div className="summary-card muted-card">
-            <p className="summary-label">{t('done')}</p>
-            <p className="summary-value">{completedCount}</p>
+          <div className="settings">
+            <label className="field">
+              <span>{t('language')}</span>
+              <select
+                value={language}
+                onChange={async (event) => {
+                  if (settingLang) return
+                  setSettingLang(true)
+                  await persistLanguage(event.target.value)
+                  setSettingLang(false)
+                }}
+              >
+                <option value="en">English</option>
+                <option value="zh">中文</option>
+              </select>
+            </label>
           </div>
         </div>
       </header>
-
-      <section className="panel">
-        <div className="panel-header">
-          <h2>{t('settings')}</h2>
-        </div>
-        <div className="actions">
-          <button
-            type="button"
-            className="ghost"
-            onClick={async () => {
-              if (settingLang) return
-              setSettingLang(true)
-              await persistLanguage('en')
-              setSettingLang(false)
-            }}
-          >
-            English
-          </button>
-          <button
-            type="button"
-            className="ghost"
-            onClick={async () => {
-              if (settingLang) return
-              setSettingLang(true)
-              await persistLanguage('zh')
-              setSettingLang(false)
-            }}
-          >
-            中文
-          </button>
-        </div>
-      </section>
 
       <section className="panel">
         <h2>{t('addTask')}</h2>
@@ -448,12 +485,34 @@ function App() {
               />
             </label>
             <label className="field">
+              <span>{t('quickDate')}</span>
+              <select
+                value={quickDatePreset}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setQuickDatePreset(value)
+                  if (value && value !== 'custom') {
+                    setForm((prev) => ({ ...prev, due_date: value }))
+                  }
+                }}
+              >
+                {quickDateOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
               <span>{t('dueDate')}</span>
               <input
                 type="date"
                 name="due_date"
                 value={form.due_date}
-                onChange={handleChange}
+                onChange={(event) => {
+                  setQuickDatePreset('custom')
+                  handleChange(event)
+                }}
               />
             </label>
           </div>
@@ -560,7 +619,6 @@ function App() {
                       >
                         <div className="task-head">
                           <div>
-                            <p className="task-id">#{task.id}</p>
                             {!isEditing ? (
                               <h3>{task.description}</h3>
                             ) : (
