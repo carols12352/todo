@@ -58,6 +58,13 @@ curl -X POST http://127.0.0.1:5000/api/(done or remove) -H "Content-Type: applic
    - `bash build_mac.sh`
 2. Build DMG:
    - `bash dmg_mac.sh`
+3. If cannot open the app on MacOS, Either:
+   - Use
+   ```
+   sudo xattr -dr com.apple.quarantine /Applications/TodoList.app
+   sudo xattr -dr com.apple.provenance /Applications/TodoList.app
+   ```
+   - Compile the app your self using the scripts
 
 ### Windows
 1. Build windows app:
