@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['backend/cores/tray_app_mac.py'],
+    ['backend\\cores\\tray_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('tray_mac.png', '.'), ('backend/cores/frontend_dist', 'frontend_dist')],
+    datas=[('todolist_win.ico', 'todolist_win.ico'), ('backend/cores/frontend_dist', 'frontend_dist')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -32,7 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['todolist.icns'],
+    icon=['todolist_win.ico'],
 )
 coll = COLLECT(
     exe,
@@ -42,10 +42,4 @@ coll = COLLECT(
     upx=True,
     upx_exclude=[],
     name='TodoList',
-)
-app = BUNDLE(
-    coll,
-    name='TodoList.app',
-    icon='todolist.icns',
-    bundle_identifier=None,
 )

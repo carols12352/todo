@@ -1,5 +1,7 @@
 *.log
 *.json
+*.jsonl
+*.safetensors
 __pycache__/
 .env
 *.db
@@ -35,3 +37,8 @@ dist-ssr
 /mywinvenv/
 /frontend_dist/
 /dmg/
+
+# AI artifacts
+/backend/ai/models/
+/backend/ai/weights/
+/backend/ai/data/transformer/
