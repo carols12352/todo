@@ -6,10 +6,11 @@ import time
 import json
 from datetime import date, timedelta
 import tkinter as tk
-from tkinter import simpledialog, messagebox
+from tkinter import simpledialog, messagebox, ttk
 import threading
 import shutil
 import platform
+import traceback
 from urllib import request as urlrequest
 from urllib import error as urlerror
 from PIL import Image, ImageDraw
@@ -41,10 +42,11 @@ last_frontend_error = ""
 USE_TK = True
 tray_icon = None
 last_language = None
+ai_warmed = False
 
 TRAY_LABELS = {
     "en": {
-        "quick_add": "Quick add",
+        "quick_add": "AI Quick Add",
         "settings": "Settings",
         "language": "Language",
         "open_ui": "Open UI",
@@ -53,7 +55,7 @@ TRAY_LABELS = {
         "language_zh": "中文"
     },
     "zh": {
-        "quick_add": "快速添加",
+        "quick_add": "AI 快速添加",
         "settings": "设置",
         "language": "语言",
         "open_ui": "打开界面",
@@ -61,6 +63,53 @@ TRAY_LABELS = {
         "language_en": "English",
         "language_zh": "中文"
     }
+}
+
+AI_DIALOG_LABELS = {
+    "en": {
+        "title": "AI Quick Add",
+        "section_command": "Command",
+        "section_parsed": "Parsed Result",
+        "section_task": "Task Details",
+        "command": "AI Command:",
+        "analyze": "Analyze",
+        "action": "Action",
+        "target": "Target",
+        "title_label": "Title",
+        "details": "Details",
+        "due_date": "Due date",
+        "due_time": "Time (HH:MM)",
+        "all_day": "All day",
+        "category": "Category",
+        "priority": "Priority",
+        "confirm": "Confirm",
+        "cancel": "Cancel",
+        "status": "Analyzing...",
+        "warn_command": "Please enter a command.",
+        "warn_target": "Missing target task ID.",
+    },
+    "zh": {
+        "title": "AI 快速添加",
+        "section_command": "指令",
+        "section_parsed": "解析结果",
+        "section_task": "任务详情",
+        "command": "AI 指令：",
+        "analyze": "解析",
+        "action": "动作",
+        "target": "目标",
+        "title_label": "标题",
+        "details": "详情",
+        "due_date": "日期",
+        "due_time": "时间 (HH:MM)",
+        "all_day": "全天",
+        "category": "分类",
+        "priority": "优先级",
+        "confirm": "确认",
+        "cancel": "取消",
+        "status": "解析中...",
+        "warn_command": "请输入指令。",
+        "warn_target": "缺少目标任务 ID。",
+    },
 }
 
 
@@ -235,8 +284,24 @@ def read_log_tail(path, max_lines=20):
         return ""
 
 
+def _trim_log_if_needed(path, max_bytes=2 * 1024 * 1024, keep_lines=2000):
+    try:
+        if not os.path.exists(path):
+            return
+        if os.path.getsize(path) <= max_bytes:
+            return
+        with open(path, "r", encoding="utf-8", errors="ignore") as file:
+            lines = file.readlines()
+        tail = lines[-keep_lines:] if len(lines) > keep_lines else lines
+        with open(path, "w", encoding="utf-8", errors="ignore") as file:
+            file.writelines(tail)
+    except Exception:
+        pass
+
+
 def append_log(path, message):
     try:
+        _trim_log_if_needed(path)
         with open(path, "a", encoding="utf-8", errors="ignore") as file:
             file.write(message)
             if not message.endswith("\n"):
@@ -245,11 +310,13 @@ def append_log(path, message):
         pass
 
 
-def api_add_task(description, details="", due_date=None):
+def api_add_task(description, details="", due_date=None, all_day=None, datetime_value=None):
     payload = {
         "description": description,
         "details": details,
-        "due_date": due_date
+        "due_date": due_date,
+        "all_day": all_day if all_day is not None else (True if due_date else None),
+        "datetime": datetime_value if datetime_value is not None else (due_date if due_date else None),
     }
     data = json.dumps(payload).encode("utf-8")
     req = urlrequest.Request(
@@ -264,6 +331,77 @@ def api_add_task(description, details="", due_date=None):
         return json.loads(payload).get("task_id")
     except Exception:
         return None
+
+
+def api_update_task(task_id, payload):
+    data = json.dumps({"id": task_id, **payload}).encode("utf-8")
+    req = urlrequest.Request(
+        f"{API_BASE}/update",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urlrequest.urlopen(req, timeout=5):
+        pass
+
+
+def api_remove_task(task_id):
+    payload = {"id": task_id}
+    data = json.dumps(payload).encode("utf-8")
+    req = urlrequest.Request(
+        f"{API_BASE}/remove",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urlrequest.urlopen(req, timeout=5):
+        pass
+
+
+def api_reopen_task(task_id):
+    payload = {"id": task_id}
+    data = json.dumps(payload).encode("utf-8")
+    req = urlrequest.Request(
+        f"{API_BASE}/reopen",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urlrequest.urlopen(req, timeout=5):
+        pass
+
+
+def api_ai_parse(text, timeout_seconds=45):
+    payload = {"text": text}
+    data = json.dumps(payload).encode("utf-8")
+    req = urlrequest.Request(
+        f"{API_BASE}/ai/parse",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urlrequest.urlopen(req, timeout=timeout_seconds) as response:
+        body = response.read().decode("utf-8") or "{}"
+    return json.loads(body)
+
+
+def api_ai_warm():
+    global ai_warmed
+    if ai_warmed:
+        return
+    try:
+        req = urlrequest.Request(f"{API_BASE}/ai/warm", method="POST")
+        with urlrequest.urlopen(req, timeout=10):
+            pass
+        ai_warmed = True
+    except Exception as exc:
+        append_log(BACKEND_LOG, f"AI warm failed: {exc}")
+
+
+def api_ai_unload():
+    req = urlrequest.Request(f"{API_BASE}/ai/unload", method="POST")
+    with urlrequest.urlopen(req, timeout=10):
+        pass
 
 
 def api_mark_done(task_id):
@@ -296,9 +434,25 @@ def init_tk_root():
     global tk_root
     if tk_root is not None:
         return tk_root
+    if platform.system().lower().startswith("win"):
+        try:
+            import ctypes
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            except Exception:
+                ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
     tk_root = tk.Tk()
+    try:
+        # Align Tk scaling with Windows DPI to avoid click offset.
+        scale = tk_root.winfo_fpixels("1i") / 72.0
+        tk_root.tk.call("tk", "scaling", scale)
+    except Exception:
+        pass
     tk_root.withdraw()
     tk_root.attributes("-topmost", True)
+    append_log(BACKEND_LOG, "Tk root initialized.")
     return tk_root
 
 
@@ -339,69 +493,265 @@ def _tk_choose_from_list(root, title, message, options):
     return result["value"]
 
 
-def prompt_quick_add(root):
-    description = simpledialog.askstring("Quick Add", "Task description:", parent=root)
-    if not description:
+def _build_datetime_payload(due_date, due_time, all_day):
+    if not due_date:
+        return None, None
+    if all_day or not due_time:
+        return True, due_date
+    return False, f"{due_date}T{due_time}"
+
+
+def _normalize_ai_result(result):
+    action = result.get("action") or "add"
+    target_id = (result.get("target") or {}).get("id")
+    patch = result.get("task_patch") or {}
+    return action, target_id, patch
+
+
+def prompt_ai_quick_add(root):
+    if root is None:
         return None
 
-    details = simpledialog.askstring("Quick Add", "Details (optional):", parent=root)
-    options = ["Today", "Tomorrow", "Next 3 days", "Next week", "Custom", "No due date"]
-    choice = _tk_choose_from_list(root, "Quick Add", "Choose a due date shortcut:", options)
-    due_date = ""
-    if choice == "Today":
-        due_date = date.today().isoformat()
-    elif choice == "Tomorrow":
-        due_date = (date.today() + timedelta(days=1)).isoformat()
-    elif choice == "Next 3 days":
-        due_date = (date.today() + timedelta(days=3)).isoformat()
-    elif choice == "Next week":
-        due_date = (date.today() + timedelta(days=7)).isoformat()
-    elif choice == "Custom":
-        due_date = simpledialog.askstring("Quick Add", "Due date (YYYY-MM-DD, optional):", parent=root) or ""
+    lang = get_language()
+    labels = AI_DIALOG_LABELS.get(lang, AI_DIALOG_LABELS["en"])
 
-    return description.strip(), (details or "").strip(), (due_date or "").strip() or None
+    try:
+        dialog = tk.Toplevel(root)
+        dialog.title(labels["title"])
+        dialog.geometry("700x760")
+        dialog.minsize(680, 720)
+        dialog.resizable(True, True)
+        dialog.attributes("-topmost", True)
+        try:
+            screen_w = dialog.winfo_screenwidth()
+            screen_h = dialog.winfo_screenheight()
+            x = max((screen_w - 700) // 2, 0)
+            y = max((screen_h - 760) // 2, 0)
+            dialog.geometry(f"700x760+{x}+{y}")
+        except Exception:
+            pass
+        dialog.update_idletasks()
+        dialog.deiconify()
+        dialog.lift()
+        dialog.focus_force()
+        dialog.grab_set()
+    except Exception as exc:
+        append_log(BACKEND_LOG, f"AI dialog init failed: {exc}\n{traceback.format_exc()}")
+        raise
+
+    state = {"parsed": False, "action": "add", "target_id": None}
+    command_var = tk.StringVar(dialog, value="")
+    action_var = tk.StringVar(dialog, value=f"{labels['action']}: -")
+    target_var = tk.StringVar(dialog, value=f"{labels['target']}: -")
+    status_var = tk.StringVar(dialog, value="")
+    description_var = tk.StringVar(dialog, value="")
+    due_date_var = tk.StringVar(dialog, value="")
+    due_time_var = tk.StringVar(dialog, value="")
+    all_day_var = tk.BooleanVar(dialog, value=True)
+    category_var = tk.StringVar(dialog, value="personal")
+    priority_var = tk.StringVar(dialog, value="medium")
+    result = {"value": None}
+    details_text = None
+
+    def parse_command():
+        text = command_var.get().strip()
+        if not text:
+            messagebox.showwarning("TodoList", labels["warn_command"], parent=dialog)
+            return
+        try:
+            status_var.set(labels["status"])
+            progress.start(8)
+            dialog.configure(cursor="watch")
+            analyze_btn.state(["disabled"])
+            confirm_btn.state(["disabled"])
+            dialog.update_idletasks()
+            ai_result = api_ai_parse(text)
+        except Exception as exc:
+            status_var.set("")
+            progress.stop()
+            dialog.configure(cursor="")
+            analyze_btn.state(["!disabled"])
+            confirm_btn.state(["!disabled"])
+            messagebox.showerror("TodoList", f"AI parse failed:\n{exc}", parent=dialog)
+            return
+        status_var.set("")
+        progress.stop()
+        dialog.configure(cursor="")
+        analyze_btn.state(["!disabled"])
+        confirm_btn.state(["!disabled"])
+        action, target_id, patch = _normalize_ai_result(ai_result)
+        state["parsed"] = True
+        state["action"] = action
+        state["target_id"] = target_id
+        action_var.set(f"{labels['action']}: {action}")
+        target_var.set(f"{labels['target']}: {target_id if target_id is not None else '-'}")
+
+        description_var.set(patch.get("description") or "")
+        if details_text is not None:
+            details_text.delete("1.0", "end")
+            details_text.insert("1.0", patch.get("details") or "")
+        due_date_var.set(patch.get("due_date") or "")
+        due_time_var.set(patch.get("due_time") or "")
+        if patch.get("all_day") is None:
+            all_day_var.set(True if patch.get("due_date") and not patch.get("due_time") else False)
+        else:
+            all_day_var.set(bool(patch.get("all_day")))
+        category_var.set(patch.get("category") or "personal")
+        priority_var.set(patch.get("priority") or "medium")
+
+    def on_confirm():
+        if not state["parsed"]:
+            parse_command()
+            if not state["parsed"]:
+                return
+        action = state["action"]
+        target_id = state["target_id"]
+        if action in ("done", "reopen", "remove") and target_id is None:
+            messagebox.showwarning("TodoList", labels["warn_target"], parent=dialog)
+            return
+        if action in ("add", "update"):
+            all_day, datetime_value = _build_datetime_payload(
+                due_date_var.get().strip(),
+                due_time_var.get().strip(),
+                all_day_var.get()
+            )
+            payload = {
+                "description": description_var.get().strip(),
+                "details": (details_text.get("1.0", "end") if details_text else "").strip(),
+                "due_date": due_date_var.get().strip() or None,
+                "all_day": all_day,
+                "datetime": datetime_value,
+                "category": category_var.get().strip() or "personal",
+                "priority": priority_var.get().strip() or "medium",
+                "color": None,
+            }
+        else:
+            payload = None
+
+        result["value"] = (action, target_id, payload)
+        dialog.destroy()
+
+    def on_cancel():
+        result["value"] = None
+        dialog.destroy()
+
+    style = ttk.Style(dialog)
+    try:
+        style.theme_use("clam")
+    except Exception:
+        pass
+    style.configure("AI.TLabel", font=("Segoe UI", 10))
+    style.configure("AI.Title.TLabel", font=("Segoe UI", 10, "bold"))
+    style.configure("AI.TButton", font=("Segoe UI", 10), padding=(10, 4))
+    style.configure("AI.TEntry", font=("Segoe UI", 10))
+    style.configure("AI.TCheckbutton", font=("Segoe UI", 10))
+
+    container = ttk.Frame(dialog, padding=18)
+    container.pack(fill="both", expand=True)
+    container.columnconfigure(0, weight=1)
+    container.rowconfigure(2, weight=1)
+
+    command_frame = ttk.LabelFrame(container, text=labels["section_command"], padding=12)
+    command_frame.grid(row=0, column=0, sticky="ew")
+    command_frame.columnconfigure(0, weight=1)
+    ttk.Label(command_frame, text=labels["command"], style="AI.Title.TLabel").grid(row=0, column=0, sticky="w")
+    ttk.Entry(command_frame, textvariable=command_var, style="AI.TEntry").grid(row=1, column=0, sticky="ew", pady=(6, 10))
+    toolbar = ttk.Frame(command_frame)
+    toolbar.grid(row=2, column=0, sticky="w")
+    analyze_btn = ttk.Button(toolbar, text=labels["analyze"], command=parse_command, style="AI.TButton")
+    analyze_btn.pack(side="left")
+    ttk.Label(toolbar, textvariable=status_var, foreground="#2563eb", style="AI.TLabel").pack(side="left", padx=(10, 0))
+    progress = ttk.Progressbar(command_frame, mode="indeterminate")
+    progress.grid(row=3, column=0, sticky="ew", pady=(6, 0))
+
+    meta = ttk.LabelFrame(container, text=labels["section_parsed"], padding=10)
+    meta.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+    meta.columnconfigure(0, weight=1)
+    ttk.Label(meta, textvariable=action_var, style="AI.TLabel").grid(row=0, column=0, sticky="w")
+    ttk.Label(meta, textvariable=target_var, style="AI.TLabel").grid(row=1, column=0, sticky="w")
+
+    form = ttk.LabelFrame(container, text=labels["section_task"], padding=12)
+    form.grid(row=2, column=0, sticky="nsew", pady=(12, 0))
+    form.columnconfigure(1, weight=1)
+    form.rowconfigure(1, weight=1)
+
+    ttk.Label(form, text=labels["title_label"], style="AI.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+    ttk.Entry(form, textvariable=description_var, style="AI.TEntry").grid(row=0, column=1, sticky="ew", pady=(0, 8))
+
+    ttk.Label(form, text=labels["details"], style="AI.TLabel").grid(row=1, column=0, sticky="nw", pady=(0, 8))
+    details_text = tk.Text(form, height=6, wrap="word", font=("Segoe UI", 10))
+    details_text.grid(row=1, column=1, sticky="nsew", pady=(0, 8))
+
+    ttk.Label(form, text=labels["due_date"], style="AI.TLabel").grid(row=2, column=0, sticky="w", pady=(0, 8))
+    ttk.Entry(form, textvariable=due_date_var, width=18, style="AI.TEntry").grid(row=2, column=1, sticky="w", pady=(0, 8))
+
+    ttk.Label(form, text=labels["due_time"], style="AI.TLabel").grid(row=3, column=0, sticky="w", pady=(0, 8))
+    ttk.Entry(form, textvariable=due_time_var, width=18, style="AI.TEntry").grid(row=3, column=1, sticky="w", pady=(0, 8))
+
+    ttk.Checkbutton(form, text=labels["all_day"], variable=all_day_var, style="AI.TCheckbutton").grid(row=4, column=1, sticky="w", pady=(0, 10))
+
+    ttk.Label(form, text=labels["category"], style="AI.TLabel").grid(row=5, column=0, sticky="w", pady=(0, 8))
+    ttk.OptionMenu(form, category_var, "personal", "work", "study", "personal").grid(row=5, column=1, sticky="w", pady=(0, 8))
+
+    ttk.Label(form, text=labels["priority"], style="AI.TLabel").grid(row=6, column=0, sticky="w", pady=(0, 8))
+    ttk.OptionMenu(form, priority_var, "medium", "high", "medium", "low").grid(row=6, column=1, sticky="w", pady=(0, 8))
+
+    actions = ttk.Frame(container)
+    actions.grid(row=3, column=0, sticky="se", pady=(12, 0))
+    ttk.Button(actions, text=labels["cancel"], command=on_cancel, style="AI.TButton").pack(side="right")
+    confirm_btn = ttk.Button(actions, text=labels["confirm"], command=on_confirm, style="AI.TButton")
+    confirm_btn.pack(side="right", padx=(8, 0))
+
+    dialog.wait_window()
+    return result["value"]
 
 
 def quick_add_flow():
     try:
+        append_log(BACKEND_LOG, "Quick add flow started.")
         root = init_tk_root()
-        result = prompt_quick_add(root)
+        append_log(BACKEND_LOG, "Opening AI quick add dialog.")
+        result = prompt_ai_quick_add(root)
+        append_log(BACKEND_LOG, f"AI quick add dialog closed. Result: {'ok' if result else 'cancel'}")
         if not result:
             return
-        description, details, due_date = result
-        if not description:
+        action, target_id, payload = result
+        if action == "done" and target_id is not None:
+            api_mark_done(target_id)
             return
-        if due_date:
-            try:
-                due_obj = date.fromisoformat(due_date)
-                if due_obj < date.today():
-                    confirm = messagebox.askyesno(
-                        "TodoList",
-                        "Due date is in the past. Add anyway and mark it done?",
-                        parent=root
-                    )
-                    if not confirm:
-                        return
-            except Exception:
-                pass
-        task_id = api_add_task(description, details, due_date)
-        if due_date:
-            try:
-                due_obj = date.fromisoformat(due_date)
-                if due_obj < date.today() and task_id is not None:
-                    api_mark_done(task_id)
-            except Exception:
-                pass
+        if action == "reopen" and target_id is not None:
+            api_reopen_task(target_id)
+            return
+        if action == "remove" and target_id is not None:
+            api_remove_task(target_id)
+            return
+        if action == "update" and target_id is not None and payload is not None:
+            api_update_task(target_id, payload)
+            return
+        if payload is not None:
+            api_add_task(
+                payload.get("description", ""),
+                payload.get("details", ""),
+                payload.get("due_date"),
+                payload.get("all_day"),
+                payload.get("datetime"),
+            )
     except urlerror.URLError as exc:
+        append_log(BACKEND_LOG, f"Quick add URL error: {exc}")
         messagebox.showerror("TodoList", f"Failed to add task:\n{exc}")
     except Exception as exc:
+        append_log(BACKEND_LOG, f"Quick add error: {exc}\n{traceback.format_exc()}")
         messagebox.showerror("TodoList", f"Unexpected error:\n{exc}")
+    finally:
+        pass
 
 
 def quick_add_task(icon, _item):
+    append_log(BACKEND_LOG, "Tray menu clicked: quick_add")
     start_server()
     if tk_root is None:
-        init_tk_root()
+        append_log(BACKEND_LOG, "Quick add requested before Tk root is ready.")
+        return
     tk_root.after(0, quick_add_flow)
 
 
@@ -474,11 +824,17 @@ def watch_language_changes(interval_seconds=2.0):
 
 
 def quit_app(icon, _item):
+    try:
+        api_ai_unload()
+    except Exception:
+        pass
     stop_server()
     stop_frontend()
     icon.stop()
     if tk_root is not None:
         tk_root.after(0, tk_root.quit)
+        tk_root.after(0, tk_root.destroy)
+    os._exit(0)
 
 
 def start_services(show_success):
@@ -502,6 +858,7 @@ def start_services(show_success):
     frontend_ok = wait_for_service(is_frontend_ready, timeout_seconds=12, interval_seconds=0.5)
 
     if backend_ok and frontend_ok:
+        threading.Thread(target=api_ai_warm, daemon=True).start()
         if show_success:
             show_info("Backend and frontend started successfully.")
         return
@@ -534,10 +891,10 @@ def start_services(show_success):
 
 def main():
     global tray_icon
+    init_tk_root()
     tray_icon = pystray.Icon("todolist", create_icon_image(), "TodoList", build_menu())
     threading.Thread(target=watch_language_changes, daemon=True).start()
     threading.Thread(target=tray_icon.run, daemon=True).start()
-    init_tk_root()
     tk_root.after(0, lambda: start_services(show_success=False))
     tk_root.mainloop()
 

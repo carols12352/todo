@@ -1,6 +1,7 @@
-ACTION_LABELS = ["add", "update", "done", "reopen", "remove"]
+﻿ACTION_LABELS = ["add", "update", "done", "reopen", "remove"]
 
-SLOT_ENTITY_LABELS = ["ID", "DATE", "CATEGORY", "PRIORITY", "TITLE"]
+# Slot entities are post-processed into structured task fields.
+SLOT_ENTITY_LABELS = ["ID", "DATE", "TIME", "ALLDAY", "CATEGORY", "PRIORITY", "TITLE"]
 
 SLOT_LABELS = [
     "O",
@@ -8,6 +9,10 @@ SLOT_LABELS = [
     "I-ID",
     "B-DATE",
     "I-DATE",
+    "B-TIME",
+    "I-TIME",
+    "B-ALLDAY",
+    "I-ALLDAY",
     "B-CATEGORY",
     "I-CATEGORY",
     "B-PRIORITY",

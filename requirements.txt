@@ -3,6 +3,6 @@ flask
 flask-cors
 Pillow
 pystray
-torch
+torch>=2.1.0
 transformers
 accelerate>=1.1.0

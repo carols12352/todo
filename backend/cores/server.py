@@ -1,4 +1,5 @@
 import os
+import sys
 import flask
 import logging
 import traceback
@@ -9,6 +10,17 @@ from settings_store import load_settings, save_settings
 from flask import request, send_from_directory
 from logging.handlers import RotatingFileHandler
 from app_paths import get_resource_path, get_project_root, get_logs_dir
+
+AI_AVAILABLE = False
+AI_LOAD_ERROR = None
+try:
+    project_root = get_project_root()
+    if project_root not in sys.path:
+        sys.path.append(project_root)
+    from backend.ai import parse_nl_transformer, warmup_transformer, unload_transformer
+    AI_AVAILABLE = True
+except Exception as exc:
+    AI_LOAD_ERROR = exc
 
 def resolve_frontend_dist():
     packaged_dist = get_resource_path("frontend_dist")
@@ -38,6 +50,20 @@ file_handler.setFormatter(
 )
 logger.addHandler(file_handler)
 
+def coerce_bool(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "y", "on"):
+        return True
+    if text in ("0", "false", "no", "n", "off"):
+        return False
+    return None
+
 SQLinit("tasks")
 storage = SQLStorage("tasks") 
 print("server.py loaded!")
@@ -54,6 +80,8 @@ def add_task():
         description = data.get("description", "")
         details = data.get("details", "")
         due_date = data.get("due_date", None)
+        all_day = coerce_bool(data.get("all_day", None))
+        datetime_value = data.get("datetime", None)
         category = data.get("category", "personal")
         priority = data.get("priority", "medium")
         color = data.get("color", None)
@@ -61,6 +89,8 @@ def add_task():
         description = request.args.get("description")
         details = request.args.get("details")
         due_date = request.args.get("due_date")
+        all_day = coerce_bool(request.args.get("all_day"))
+        datetime_value = request.args.get("datetime")
         category = request.args.get("category", "personal")
         priority = request.args.get("priority", "medium")
         color = request.args.get("color")
@@ -70,10 +100,17 @@ def add_task():
         "details": details,
         "completed": False,
         "due_date": due_date,
+        "all_day": all_day,
+        "datetime": datetime_value,
         "category": category,
         "priority": priority,
         "color": color
     }
+
+    if task["due_date"] and not task["datetime"]:
+        task["datetime"] = task["due_date"]
+    if task["due_date"] and task["all_day"] is None:
+        task["all_day"] = task["datetime"] == task["due_date"]
 
     task_id = storage.add_task(task)
     return flask.jsonify({"task_id": task_id})
@@ -148,6 +185,8 @@ def update_task():
         description = data.get("description", "")
         details = data.get("details", "")
         due_date = data.get("due_date", None)
+        all_day = coerce_bool(data.get("all_day", None))
+        datetime_value = data.get("datetime", None)
         category = data.get("category", "personal")
         priority = data.get("priority", "medium")
         color = data.get("color", None)
@@ -156,6 +195,8 @@ def update_task():
         description = request.args.get("description", "")
         details = request.args.get("details", "")
         due_date = request.args.get("due_date")
+        all_day = coerce_bool(request.args.get("all_day"))
+        datetime_value = request.args.get("datetime")
         category = request.args.get("category", "personal")
         priority = request.args.get("priority", "medium")
         color = request.args.get("color")
@@ -163,11 +204,72 @@ def update_task():
     if task_id is None:
         return flask.jsonify({"error": "Task ID is required"}), 400
 
-    success = storage.update_task(task_id, description, details, due_date, category, priority, color)
+    if due_date and not datetime_value:
+        datetime_value = due_date
+    if due_date and all_day is None:
+        all_day = datetime_value == due_date
+
+    success = storage.update_task(
+        task_id,
+        description,
+        details,
+        due_date,
+        category,
+        priority,
+        color,
+        all_day,
+        datetime_value,
+    )
     if not success:
         return flask.jsonify({"error": "Task not found"}), 404
 
     return flask.jsonify({"message": f"Task {task_id} updated"})
+
+
+@app.route("/api/ai/parse", methods=["POST"])
+def ai_parse():
+    if not AI_AVAILABLE:
+        detail = str(AI_LOAD_ERROR) if AI_LOAD_ERROR else "AI unavailable"
+        return flask.jsonify({"error": detail}), 503
+    if request.is_json:
+        data = flask.request.json or {}
+        text = data.get("text", "")
+    else:
+        text = request.args.get("text", "")
+    if not text:
+        return flask.jsonify({"error": "Text is required"}), 400
+    try:
+        result = parse_nl_transformer(text)
+        return flask.jsonify(result)
+    except Exception as exc:
+        logger.error(f"AI parse failed: {exc}\n{traceback.format_exc()}")
+        return flask.jsonify({"error": "AI parse failed"}), 500
+
+
+@app.route("/api/ai/warm", methods=["POST"])
+def ai_warm():
+    if not AI_AVAILABLE:
+        detail = str(AI_LOAD_ERROR) if AI_LOAD_ERROR else "AI unavailable"
+        return flask.jsonify({"error": detail}), 503
+    try:
+        warmup_transformer()
+        return flask.jsonify({"status": "ok"})
+    except Exception as exc:
+        logger.error(f"AI warmup failed: {exc}\n{traceback.format_exc()}")
+        return flask.jsonify({"error": "AI warmup failed"}), 500
+
+
+@app.route("/api/ai/unload", methods=["POST"])
+def ai_unload():
+    if not AI_AVAILABLE:
+        detail = str(AI_LOAD_ERROR) if AI_LOAD_ERROR else "AI unavailable"
+        return flask.jsonify({"error": detail}), 503
+    try:
+        unload_transformer()
+        return flask.jsonify({"status": "ok"})
+    except Exception as exc:
+        logger.error(f"AI unload failed: {exc}\n{traceback.format_exc()}")
+        return flask.jsonify({"error": "AI unload failed"}), 500
 
 
 @app.route("/api/settings", methods=["GET", "POST"])

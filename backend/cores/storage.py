@@ -28,8 +28,8 @@ class SQLStorage:
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO tasks (description, details, completed, due_date, category, priority, color)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO tasks (description, details, completed, due_date, category, priority, color, all_day, datetime)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 task["description"],
                 task.get("details", ""),
@@ -37,7 +37,9 @@ class SQLStorage:
                 task.get("due_date"),
                 task.get("category", "personal"),
                 task.get("priority", "medium"),
-                task.get("color")
+                task.get("color"),
+                task.get("all_day"),
+                task.get("datetime"),
             ))
             conn.commit()
             task_id = cursor.lastrowid
@@ -68,7 +70,9 @@ class SQLStorage:
                     "due_date": row[4],
                     "category": row[5],
                     "priority": row[6],
-                    "color": row[7]
+                    "color": row[7],
+                    "all_day": bool(row[8]) if row[8] is not None else None,
+                    "datetime": row[9],
                 }
                 tasks.append(task)
             logger.debug(f"Listed {len(tasks)} tasks.")
@@ -113,16 +117,16 @@ class SQLStorage:
             print(f"Task ID {task_id} reopened.")
             return True
 
-    def update_task(self, task_id, description, details, due_date, category, priority, color):
+    def update_task(self, task_id, description, details, due_date, category, priority, color, all_day, datetime_value):
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
                 UPDATE tasks
-                SET description = ?, details = ?, due_date = ?, category = ?, priority = ?, color = ?
+                SET description = ?, details = ?, due_date = ?, category = ?, priority = ?, color = ?, all_day = ?, datetime = ?
                 WHERE id = ?
                 """,
-                (description, details, due_date, category, priority, color, task_id)
+                (description, details, due_date, category, priority, color, all_day, datetime_value, task_id)
             )
             if cursor.rowcount == 0:
                 logger.warning(f"Task ID {task_id} not found to update.")

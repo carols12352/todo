@@ -71,3 +71,22 @@ export async function saveSettings(language) {
   });
   return handleResponse(res);
 }
+
+export async function parseAi(text) {
+  const res = await fetch(`${API_BASE}/api/ai/parse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  return handleResponse(res);
+}
+
+export async function warmAi() {
+  const res = await fetch(`${API_BASE}/api/ai/warm`, { method: 'POST' });
+  return handleResponse(res);
+}
+
+export async function unloadAi() {
+  const res = await fetch(`${API_BASE}/api/ai/unload`, { method: 'POST' });
+  return handleResponse(res);
+}

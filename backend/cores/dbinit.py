@@ -30,7 +30,9 @@ def SQLinit(name: str):
             due_date DATE,
             category TEXT DEFAULT 'personal',
             priority TEXT DEFAULT 'medium',
-            color TEXT
+            color TEXT,
+            all_day BOOLEAN,
+            datetime TEXT
         )
         """)
 
@@ -42,9 +44,15 @@ def SQLinit(name: str):
             cursor.execute("ALTER TABLE tasks ADD COLUMN priority TEXT DEFAULT 'medium'")
         if "color" not in existing_columns:
             cursor.execute("ALTER TABLE tasks ADD COLUMN color TEXT")
+        if "all_day" not in existing_columns:
+            cursor.execute("ALTER TABLE tasks ADD COLUMN all_day BOOLEAN")
+        if "datetime" not in existing_columns:
+            cursor.execute("ALTER TABLE tasks ADD COLUMN datetime TEXT")
 
         cursor.execute("UPDATE tasks SET category = 'personal' WHERE category IS NULL")
         cursor.execute("UPDATE tasks SET priority = 'medium' WHERE priority IS NULL")
+        cursor.execute("UPDATE tasks SET all_day = 1 WHERE all_day IS NULL AND due_date IS NOT NULL")
+        cursor.execute("UPDATE tasks SET datetime = due_date WHERE datetime IS NULL AND due_date IS NOT NULL")
 
         conn.commit()
         conn.close()
